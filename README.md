@@ -238,6 +238,22 @@ extension. The built-in project evaluator uses Sinkhorn EMD and must not be
 presented as numerically identical. Also distinguish full-set metrics from the
 TopoDiT paper's average of independent 8-vs-8 batches.
 
+For a resumable formal multi-seed run, build TopoDiT's `emd_cuda` extension and
+point `EMD_EXTENSION_DIR` at the directory containing `emd_cuda*.so`, then run:
+
+```bash
+cd hmc_dit3d
+EMD_EXTENSION_DIR=/path/to/compiled/emd_cuda \
+  micromamba run -n hmc-dit3d-py312 python \
+  scripts/run_multiseed_n664.py
+```
+
+The default queue runs seeds `0,1,2,3,4` first, then automatically continues
+with `5,6,7,8,9,10,11,12,13,42`. Every seed covers Chair, Airplane, and Car at
+N=664 with generation batch size 8. The queue validates and skips completed
+payloads when restarted, writes per-seed exact batch-8 metrics, and continuously
+refreshes `results/vae_prior_multiseed_n664_batch8/summary.json`.
+
 ## 7. Train from scratch
 
 The active formal configs are:

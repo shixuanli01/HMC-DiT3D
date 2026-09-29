@@ -52,6 +52,17 @@ Metric order above is always: 1-NNA-CD, 1-NNA-EMD, COV-CD, COV-EMD.
 - TopoDiT CD evaluator: `hmc_dit3d/scripts/eval_topodit_protocol.py`
 - Active configs: `hmc_dit3d/configs/train_*_h100_formal_bottleneck.yaml`
 
+## Formal multi-seed queue
+
+- Runner: `hmc_dit3d/scripts/run_multiseed_n664.py`
+- Phase 1 seeds: `0,1,2,3,4`
+- Phase 2 seeds: `5,6,7,8,9,10,11,12,13,42`
+- Each seed evaluates Chair, Airplane, and Car with N=664 and generation
+  batch size 8 using the stable beta=0.05, latent-64 VAE checkpoints.
+- Results: `hmc_dit3d/results/vae_prior_multiseed_n664_batch8/`
+- The runner is resumable: rerun the same command from `README.md`; valid
+  sample and metric payloads are checked and skipped instead of overwritten.
+
 ## Safe first actions
 
 1. Download data/checkpoints as described in `README.md`.
@@ -60,4 +71,3 @@ Metric order above is always: 1-NNA-CD, 1-NNA-EMD, COV-CD, COV-EMD.
 4. Reproduce one N=64 sample/evaluation before spending time on N=664.
 5. Never overwrite an existing result payload; use a new directory tagged with
    VAE, seed, N, and batch size.
-
