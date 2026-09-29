@@ -1,0 +1,18 @@
+experiment_name: hmc_dit3d_smoke
+seed: 3407
+
+hmc:
+  scales: [2, 3, 4]
+  q_orders: [0.0, 0.5, 1.0, 2.0]
+  normalization_mode: bbox
+  delta: 1.0e-8
+  empty_box_epsilon: 1.0e-12
+  use_spectrum: false
+  spectrum_bins: 0
+
+encoder:
+  model_dim: 256
+  num_heads: 8
+  num_layers: 2
+  dropout: 0.0
+  window_length: 64

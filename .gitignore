@@ -1,0 +1,40 @@
+# Data and archives
+ShapeNetCore.v2.PC15k/
+ShapeNetCore.v2.PC15k.zip
+*.zip
+
+# Model artifacts and generated outputs
+checkpoints/
+results/
+hmc_results/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Logs, jobs, and rendered artifacts
+*.log
+*.out
+slurm-*.txt
+*_test_*.txt
+chair_[0-9]*.txt
+airplane_[0-9]*.txt
+car_[0-9]*.txt
+final_imgs/
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+

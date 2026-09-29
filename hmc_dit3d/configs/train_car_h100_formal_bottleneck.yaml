@@ -1,0 +1,76 @@
+experiment_name: train_car_h100_formal_bottleneck
+
+hmc:
+  scales: [3, 4, 5]
+  q_orders: [1.0, 2.0, 3.0]
+  normalization_mode: bbox
+  delta: 1.0e-8
+  empty_box_epsilon: 1.0e-12
+  use_spectrum: false
+  spectrum_bins: 0
+
+encoder:
+  model_dim: 384
+  num_heads: 6
+  num_layers: 2
+  dropout: 0.0
+  window_length: 64
+
+diffusion:
+  schedule_type: linear
+  beta_start: 1.0e-4
+  beta_end: 2.0e-2
+  num_timesteps: 1000
+
+data:
+  root_dir: ../../ShapeNetCore.v2.PC15k
+  categories: [car]
+  split: train
+  sample_size: 2048
+  batch_size: 512
+  num_workers: 4
+  pin_memory: true
+  random_subsample: true
+  drop_last: true
+
+model:
+  model_variant: bottleneck
+  voxel_size: 32
+  patch_size: 4
+  in_channels: 3
+  out_channels: 3
+  input_dim: 32
+  model_dim: 384
+  depth: 12
+  num_heads: 6
+  mlp_ratio: 4.0
+  class_dropout_prob: 0.1
+  num_bottleneck_latents: 128
+  resampler_depth: 4
+  resampler_mlp_ratio: 4.0
+
+train:
+  seed: 42
+  results_dir: ../results
+  learning_rate: 1.0e-4
+  weight_decay: 0.0
+  epochs: 10000
+  max_steps:
+  log_every: 50
+  checkpoint_name: train_checkpoint.pt
+  latest_checkpoint_name: latest.pt
+  best_train_checkpoint_name: best_train.pt
+  best_val_checkpoint_name: best_val.pt
+  checkpoint_every: 1000
+  save_every: 1000
+  metrics_name: train_metrics.jsonl
+  evolution_name: evolution.jsonl
+  validation_split: val
+  validation_every: 1
+  grad_clip: 1.0
+  grad_accum_steps: 1
+  use_l_mf: false
+  l_mf_weight: 0.0
+  l_mf_hidden_dim: 128
+  use_amp: true
+  prefer_cuda: true
