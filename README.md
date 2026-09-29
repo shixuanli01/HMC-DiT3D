@@ -7,8 +7,9 @@ conditioning tokens, and generates 2,048-point ShapeNet point clouds with a
 DiT-S/4-scale denoiser. A condition VAE provides an unpaired prior so generation
 does not require a test point cloud at inference time.
 
-This repository is the clean handoff of the active experiment. Datasets,
-checkpoints, generated samples, logs, and caches are intentionally excluded.
+This repository is the clean handoff of the active experiment. Datasets and
+checkpoints are hosted on Google Drive; generated samples, logs, and caches are
+intentionally excluded from Git.
 
 ## What we are testing
 
@@ -45,6 +46,8 @@ three categories. Do not replace it without a matched-seed N=664 comparison.
 ├── README.md
 ├── AGENTS.md
 ├── CHECKPOINTS.md
+├── CHECKPOINTS.sha256
+├── download_checkpoints.sh
 ├── checkpoints/                 # created after downloading; gitignored
 │   ├── dit/
 │   └── vae/
@@ -68,7 +71,7 @@ environment uses CUDA 12.8 and an RTX 5090; H100/A100-class GPUs are also
 appropriate.
 
 ```bash
-git clone <PUBLIC_REPOSITORY_URL>
+git clone https://github.com/shixuanli01/HMC-DiT3D.git
 cd HMC-DiT3D
 
 cd hmc_dit3d
@@ -112,8 +115,17 @@ folders to exactly `ShapeNetCore.v2.PC15k/`.
 
 ## 3. Download checkpoints
 
-See [CHECKPOINTS.md](CHECKPOINTS.md) for Google Drive file IDs, SHA-256 hashes,
-and the exact destination names. The final layout must be:
+The six verified files are in this public
+[Google Drive folder](https://drive.google.com/drive/folders/1HUuCpNJ1QBtyVwzJLoWDmIWAngdpZfrp?usp=sharing).
+Download and rename them into the paths expected by the launch scripts with:
+
+```bash
+bash download_checkpoints.sh
+```
+
+See [CHECKPOINTS.md](CHECKPOINTS.md) for individual Google Drive file IDs,
+SHA-256 hashes, roles, epochs, and manual download commands. The final layout
+is:
 
 ```text
 checkpoints/
@@ -278,4 +290,3 @@ Read [AGENTS.md](AGENTS.md) before changing training or evaluation. The most
 important invariants are: never use a test HMC bank for VAE prior generation,
 keep N=664/batch=8/seed explicit in comparisons, record checkpoint hashes, and
 do not compare full-set metrics with averages of 8-vs-8 metric batches.
-
