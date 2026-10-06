@@ -90,7 +90,10 @@ COV, not merely reconstruction quality.
   train conditions to the DiT and checking COV drops to about 54; (2) retrain
   the VAE with lower beta and pair it with the GMM prior; (3) bypass the
   decoder by generating directly in condition space (kNN interpolation or a
-  small flow / diffusion prior).
+  small flow / diffusion prior). The runbook for (1) and (2), with commands
+  and acceptance criteria, is `NEXT_STEPS_VAE_RETRAIN.md`. The DiT stays
+  fixed at `checkpoints/dit/{cat}.pt` for that work; bs512 retraining of the
+  DiT did not beat it.
 
 Metric order above is always: 1-NNA-CD, 1-NNA-EMD, COV-CD, COV-EMD.
 
@@ -107,7 +110,8 @@ Metric order above is always: 1-NNA-CD, 1-NNA-EMD, COV-CD, COV-EMD.
 - Epoch sweep under the formal protocol:
   `hmc_dit3d/scripts/sweep_retrain_epochs.py` (one worker per GPU, resumable)
 - Val-protocol diagnostics: `hmc_dit3d/scripts/diag/` (`diag_gen.py` with
-  `--mode vae|trainbank|gmm|testref`, `gmm_prior.py`, `val_eval_mmd.py`,
+  `--mode vae|trainbank|gmm|trainrecon|testref`, `gmm_prior.py`,
+  `val_eval_mmd.py`,
   `chair_seed_sweep.sh`, `rescore_missing.sh`, `summarize_chair_sweep.py`).
   These scripts hard-code the cluster paths `/fsx/weicyang/shix/...` and the
   EMD build at `/fsx/weicyang/shix/emd_build`; edit them before use elsewhere.

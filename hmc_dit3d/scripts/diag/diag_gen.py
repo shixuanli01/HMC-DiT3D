@@ -1,5 +1,7 @@
 """Diagnostic generation: same test references as the VAE protocol, swap the condition source.
-modes: vae (baseline), trainbank (random train conditions), testref (paired test conditions; oracle, diagnostic only)."""
+modes: vae (baseline), trainbank (random train conditions), gmm (GMM on train posterior means),
+trainrecon (random train conditions passed through VAE encode->decode; measures decoder loss only),
+testref (paired test conditions; oracle, diagnostic only)."""
 import argparse,sys,torch
 sys.path.insert(0,str(__import__('pathlib').Path(__file__).parent))
 from pathlib import Path
@@ -33,8 +35,12 @@ class Wrap:
             z=sample_gmm(gmm,n,temperature=a.gmm_temp,generator=g).float()
             print(f'gmm k={a.gmm_k} |mu|={mu.norm(dim=1).mean():.2f} |z|={z.norm(dim=1).mean():.2f}',flush=True)
             return s.vae.decode_conditions(z,sequence_threshold=a.threshold)
-        if a.mode=='trainbank':
+        if a.mode in ('trainbank','trainrecon'):
             idx=torch.randperm(len(bank),generator=torch.Generator().manual_seed(cfg.train.seed+1))[:n]
+            if a.mode=='trainrecon':  # same train conditions as trainbank, but reconstructed through the VAE (posterior mean)
+                with torch.no_grad():
+                    mu=s.vae.encode(bank.descriptors[idx].to(device),[x[idx].to(device) for x in bank.sequences])[0]
+                return s.vae.decode_conditions(mu,sequence_threshold=a.threshold)
         else:  # testref: reproduce reference permutation
             ds=ShapeNetPC15KDataset(root_dir=cfg.data.root_dir,categories=cfg.data.categories,split='test',sample_size=cfg.data.sample_size,random_subsample=False)
             ref=torch.randperm(len(ds),generator=torch.Generator().manual_seed(cfg.train.seed))[:n]
