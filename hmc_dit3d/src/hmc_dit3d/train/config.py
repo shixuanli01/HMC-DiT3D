@@ -305,6 +305,7 @@ class TrainConfig:
     condition_vae_posterior_temperature: float = 1.0
     use_ema: bool = False
     ema_decay: float = 0.9999
+    deterministic: bool = True
 
     def __post_init__(self) -> None:
         """Validate training configuration."""

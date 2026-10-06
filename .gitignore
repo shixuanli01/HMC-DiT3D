@@ -38,3 +38,8 @@ final_imgs/
 .vscode/
 .DS_Store
 
+
+# Local data mirrors and proxy datasets
+hf_pc15k/
+proxy_big/
+proxy_pc15k/

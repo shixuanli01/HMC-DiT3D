@@ -5,8 +5,11 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import threading
+from collections.abc import Iterable
 from itertools import chain
 from pathlib import Path
+from typing import Any
 
 import torch
 import torch.nn.functional as F
@@ -24,15 +27,15 @@ from hmc_dit3d.train.ema import ModelEMA
 from hmc_dit3d.train.smoke import (
     SmokeTrainingError,
     apply_condition_vae_reconstruction,
+    build_checkpoint_payload,
     build_dataloader,
     build_eval_dataloader,
     build_model,
     build_multifractal_predictor,
     load_training_checkpoint,
-    prepare_hmc_batch,
-    save_checkpoint,
-    select_hmc_condition_points,
+    resolve_hmc_batch,
     train_one_step,
+    write_checkpoint_payload,
 )
 from hmc_dit3d.utils.runtime import detect_device, set_global_seed
 
@@ -41,6 +44,99 @@ LOGGER = logging.getLogger(__name__)
 
 class TrainingRunError(RuntimeError):
     """Raised when the formal training pipeline fails."""
+
+
+def _map_tensors(value: Any, fn: Any) -> Any:
+    """Apply `fn` to every tensor in a nested checkpoint payload."""
+    if isinstance(value, torch.Tensor):
+        return fn(value)
+    if isinstance(value, dict):
+        return {key: _map_tensors(item, fn) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_map_tensors(item, fn) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_map_tensors(item, fn) for item in value)
+    return value
+
+
+class AsyncCheckpointWriter:
+    """Snapshot checkpoints to CPU and write them on one background thread.
+
+    A save to a path that already has an unwritten snapshot replaces it, so
+    frequently refreshed files such as `best_train.pt` only write their newest
+    state, while uniquely named files such as `epoch_1000.pt` are never
+    dropped. Writes to distinct paths happen in submission order.
+    """
+
+    def __init__(self) -> None:
+        self._condition = threading.Condition()
+        self._queued: dict[Path, tuple[dict[str, Any], torch.cuda.Event | None]] = {}
+        self._copy_stream = torch.cuda.Stream() if torch.cuda.is_available() else None
+        self._writing = False
+        self._closed = False
+        self._error: BaseException | None = None
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def submit(self, checkpoint_path: Path, **payload_kwargs: Any) -> Path:
+        # A device-side clone is cheap and frees training to continue; the
+        # device-to-host copy and disk write happen on the writer thread.
+        payload = _map_tensors(
+            build_checkpoint_payload(**payload_kwargs),
+            lambda tensor: tensor.detach().clone(),
+        )
+        ready = None
+        if self._copy_stream is not None:
+            ready = torch.cuda.Event()
+            ready.record()
+        with self._condition:
+            self._raise_if_failed()
+            self._queued.pop(checkpoint_path, None)
+            self._queued[checkpoint_path] = (payload, ready)
+            self._condition.notify_all()
+        return checkpoint_path
+
+    def flush(self) -> None:
+        with self._condition:
+            while self._queued or self._writing:
+                self._condition.wait()
+            self._raise_if_failed()
+
+    def close(self) -> None:
+        self.flush()
+        with self._condition:
+            self._closed = True
+            self._condition.notify_all()
+        self._thread.join()
+
+    def _raise_if_failed(self) -> None:
+        if self._error is not None:
+            raise TrainingRunError("Checkpoint write failed.") from self._error
+
+    def _run(self) -> None:
+        while True:
+            with self._condition:
+                while not self._queued and not self._closed:
+                    self._condition.wait()
+                if not self._queued:
+                    return
+                checkpoint_path = next(iter(self._queued))
+                payload, ready = self._queued.pop(checkpoint_path)
+                self._writing = True
+            try:
+                if ready is not None:
+                    ready.synchronize()
+                    with torch.cuda.stream(self._copy_stream):
+                        payload = _map_tensors(payload, lambda tensor: tensor.cpu())
+                write_checkpoint_payload(checkpoint_path, payload)
+                del payload
+            except BaseException as error:  # surfaced on the next submit/flush
+                LOGGER.exception("Failed to write checkpoint %s", checkpoint_path)
+                self._error = error
+            finally:
+                with self._condition:
+                    self._writing = False
+                    self._condition.notify_all()
 
 
 def append_metrics(metrics_path: Path, payload: dict[str, float | int]) -> None:
@@ -71,6 +167,7 @@ def append_evolution(
 
 
 def _save_epoch_checkpoint(
+    writer: AsyncCheckpointWriter,
     output_dir: Path,
     epoch_index: int,
     model: torch.nn.Module,
@@ -97,8 +194,8 @@ def _save_epoch_checkpoint(
         Path: Saved checkpoint path.
     """
     checkpoint_path = output_dir / f"epoch_{epoch_index + 1}.pt"
-    save_checkpoint(
-        checkpoint_path=checkpoint_path,
+    writer.submit(
+        checkpoint_path,
         model=model,
         optimizer=optimizer,
         scaler=scaler,
@@ -112,6 +209,7 @@ def _save_epoch_checkpoint(
 
 
 def _save_named_checkpoint(
+    writer: AsyncCheckpointWriter,
     checkpoint_path: Path,
     epoch_index: int,
     model: torch.nn.Module,
@@ -137,8 +235,8 @@ def _save_named_checkpoint(
     Returns:
         Path: Saved checkpoint path.
     """
-    save_checkpoint(
-        checkpoint_path=checkpoint_path,
+    writer.submit(
+        checkpoint_path,
         model=model,
         optimizer=optimizer,
         scaler=scaler,
@@ -149,6 +247,32 @@ def _save_named_checkpoint(
         ema_model_state=ema_model_state,
     )
     return checkpoint_path
+
+
+def _cache_eval_batches(
+    dataloader: torch.utils.data.DataLoader[dict[str, object]],
+    device: torch.device,
+) -> list[dict[str, object]]:
+    """Materialize a deterministic eval loader, with HMC features, on device.
+
+    The eval loader uses fixed subsampling and no shuffling, so its points and
+    HMC features are identical every epoch and only need extracting once.
+    """
+    cached: list[dict[str, object]] = []
+    for batch in dataloader:
+        cached.append(
+            {
+                "points": torch.as_tensor(batch["points"], dtype=torch.float32).to(
+                    device
+                ),
+                "label": torch.as_tensor(batch["label"], dtype=torch.int64).to(device),
+                "hmc_descriptors": batch["hmc_descriptors"].to(device),
+                "hmc_sequences": [
+                    sequence.to(device) for sequence in batch["hmc_sequences"]
+                ],
+            }
+        )
+    return cached
 
 
 def _average_epoch_metrics(
@@ -180,7 +304,7 @@ def _load_checkpoint_loss(checkpoint_path: Path, metric_name: str) -> float:
 def evaluate_validation_loss(
     config: ExperimentConfig,
     *,
-    dataloader: torch.utils.data.DataLoader[dict[str, object]],
+    dataloader: Iterable[dict[str, object]],
     diffusion: GaussianDiffusion,
     model: torch.nn.Module,
     extractor: HMCFeatureExtractor,
@@ -223,14 +347,11 @@ def evaluate_validation_loss(
 
             points = torch.as_tensor(batch["points"], dtype=torch.float32)
             labels = torch.as_tensor(batch["label"], device=device, dtype=torch.int64)
-            hmc_points = select_hmc_condition_points(
+            descriptors, sequences = resolve_hmc_batch(
                 batch,
-                config.data.hmc_point_source,
-            )
-            descriptors, sequences = prepare_hmc_batch(
-                hmc_points,
                 extractor,
                 device,
+                config.data.hmc_point_source,
             )
             if condition_vae is not None:
                 descriptors, sequences, _ = apply_condition_vae_reconstruction(
@@ -308,9 +429,23 @@ def run_training(config: ExperimentConfig) -> dict[str, float]:
     Returns:
         dict[str, float]: Final scalar metrics.
     """
-    set_global_seed(config.train.seed)
+    writer = AsyncCheckpointWriter()
+    try:
+        return _run_training(config, writer)
+    finally:
+        writer.close()
+
+
+def _run_training(
+    config: ExperimentConfig,
+    writer: AsyncCheckpointWriter,
+) -> dict[str, float]:
+    """Formal training loop body; checkpoints are written through `writer`."""
+    set_global_seed(config.train.seed, config.train.deterministic)
     device = detect_device(config.train.prefer_cuda)
-    dataloader = build_dataloader(config)
+    extractor = HMCFeatureExtractor(config.hmc)
+    extractor.precompute_hilbert_permutations()
+    dataloader = build_dataloader(config, extractor)
     if len(dataloader) == 0:
         message = (
             "Training dataloader is empty. Check batch_size, drop_last, "
@@ -323,6 +458,7 @@ def run_training(config: ExperimentConfig) -> dict[str, float]:
         val_dataloader = build_eval_dataloader(
             config,
             split=config.train.validation_split,
+            extractor=extractor,
         )
         if len(val_dataloader) == 0:
             message = (
@@ -331,8 +467,7 @@ def run_training(config: ExperimentConfig) -> dict[str, float]:
             )
             LOGGER.error(message)
             raise TrainingRunError(message)
-
-    extractor = HMCFeatureExtractor(config.hmc)
+        val_dataloader = _cache_eval_batches(val_dataloader, device)
     condition_vae = None
     if config.train.condition_vae_path is not None:
         condition_vae, condition_vae_payload = load_condition_vae_checkpoint(
@@ -448,9 +583,9 @@ def run_training(config: ExperimentConfig) -> dict[str, float]:
     LOGGER.info("Dataset size: %d", len(dataloader.dataset))
     if val_dataloader is not None:
         LOGGER.info(
-            "Validation split: %s (size=%d)",
+            "Validation split: %s (size=%d, cached on device)",
             config.train.validation_split,
-            len(val_dataloader.dataset),
+            sum(len(batch["label"]) for batch in val_dataloader),
         )
     if config.train.use_l_mf and config.train.use_amp and device.type == "cuda":
         LOGGER.info(
@@ -546,6 +681,7 @@ def run_training(config: ExperimentConfig) -> dict[str, float]:
         save_every = config.train.resolved_save_every
         if save_every is not None and (epoch + 1) % save_every == 0:
             checkpoint_path = _save_epoch_checkpoint(
+                writer,
                 output_dir=output_dir,
                 epoch_index=epoch,
                 model=model,
@@ -568,6 +704,7 @@ def run_training(config: ExperimentConfig) -> dict[str, float]:
         latest_path = None
         if (epoch + 1) % config.train.latest_every == 0:
             latest_path = _save_named_checkpoint(
+                writer,
                 checkpoint_path=latest_checkpoint_path,
                 epoch_index=epoch,
                 model=model,
@@ -591,6 +728,7 @@ def run_training(config: ExperimentConfig) -> dict[str, float]:
         ):
             best_train_loss = train_epoch_metrics["loss"]
             best_train_path = _save_named_checkpoint(
+                writer,
                 checkpoint_path=best_train_checkpoint_path,
                 epoch_index=epoch,
                 model=model,
@@ -634,6 +772,7 @@ def run_training(config: ExperimentConfig) -> dict[str, float]:
             if val_epoch_metrics["val_loss"] <= best_val_loss:
                 best_val_loss = val_epoch_metrics["val_loss"]
                 best_val_path = _save_named_checkpoint(
+                    writer,
                     checkpoint_path=best_val_checkpoint_path,
                     epoch_index=epoch,
                     model=model,
@@ -699,8 +838,8 @@ def run_training(config: ExperimentConfig) -> dict[str, float]:
             break
 
     final_checkpoint_path = output_dir / config.train.checkpoint_name
-    save_checkpoint(
-        checkpoint_path=final_checkpoint_path,
+    writer.submit(
+        final_checkpoint_path,
         model=model,
         optimizer=optimizer,
         scaler=scaler,

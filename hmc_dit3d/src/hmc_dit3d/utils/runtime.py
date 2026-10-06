@@ -12,11 +12,14 @@ import torch
 LOGGER = logging.getLogger(__name__)
 
 
-def set_global_seed(seed: int) -> None:
+def set_global_seed(seed: int, deterministic: bool = True) -> None:
     """Set all random seeds needed for reproducible experiments.
 
     Args:
         seed: Random seed value.
+        deterministic: Force deterministic kernels and math-only attention.
+            When False, seeds are still set but cuDNN autotuning and the
+            flash / memory-efficient attention kernels are allowed.
     """
     os.environ["PYTHONHASHSEED"] = str(seed)
     os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
@@ -26,6 +29,10 @@ def set_global_seed(seed: int) -> None:
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
+    if not deterministic:
+        LOGGER.info("Global seed set to %d (non-deterministic fast kernels).", seed)
+        return
+    if torch.cuda.is_available():
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
         if hasattr(torch.backends.cuda, "enable_flash_sdp"):

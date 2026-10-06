@@ -84,6 +84,11 @@ class HMCFeatureExtractor:
         self.config = config
         self._hilbert_permutations: dict[int, IntArray] = {}
 
+    def precompute_hilbert_permutations(self) -> None:
+        """Build all Hilbert permutations now so forked workers inherit them."""
+        for scale in self.config.scales:
+            self._hilbert_permutation(scale)
+
     def extract(self, points: NDArray[np.floating[Any]] | torch.Tensor) -> HMCResult:
         """Extract HMC features from a point cloud.
 

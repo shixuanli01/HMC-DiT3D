@@ -16,7 +16,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor
 from torch.optim import AdamW
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, default_collate
 
 from hmc_dit3d.data.shapenet_pc15k import ShapeNetPC15KDataset
 from hmc_dit3d.hmc.condition_vae import HMCConditionVAE
@@ -67,11 +67,43 @@ def _seed_worker(worker_id: int) -> None:
     random.seed(worker_seed + worker_id)
 
 
-def build_dataloader(config: ExperimentConfig) -> DataLoader[dict[str, Any]]:
+class HMCBatchCollator:
+    """Collate a batch and extract its HMC features inside dataloader workers.
+
+    HMC extraction is deterministic given the points, so moving it off the
+    training process yields tensors identical to `prepare_hmc_batch`.
+    """
+
+    def __init__(self, extractor: HMCFeatureExtractor, point_source: str) -> None:
+        self.extractor = extractor
+        self.point_source = point_source
+
+    def __call__(self, samples: list[dict[str, Any]]) -> dict[str, Any]:
+        batch = default_collate(samples)
+        hmc_points = select_hmc_condition_points(batch, self.point_source)
+        descriptors, sequences = extract_hmc_features_cpu(hmc_points, self.extractor)
+        batch["hmc_descriptors"] = descriptors
+        batch["hmc_sequences"] = sequences
+        return batch
+
+
+def _loader_worker_kwargs(num_workers: int) -> dict[str, Any]:
+    """Keep workers (and their Hilbert caches) alive across epochs."""
+    if num_workers <= 0:
+        return {}
+    return {"persistent_workers": True, "prefetch_factor": 4}
+
+
+def build_dataloader(
+    config: ExperimentConfig,
+    extractor: HMCFeatureExtractor | None = None,
+) -> DataLoader[dict[str, Any]]:
     """Create the ShapeNet dataloader for smoke training.
 
     Args:
         config: Full experiment configuration.
+        extractor: Optional HMC extractor; when given, HMC features are
+            computed in the dataloader workers.
 
     Returns:
         DataLoader[dict[str, Any]]: Configured dataloader.
@@ -95,6 +127,10 @@ def build_dataloader(config: ExperimentConfig) -> DataLoader[dict[str, Any]]:
         drop_last=config.data.drop_last,
         generator=generator,
         worker_init_fn=_seed_worker,
+        collate_fn=None
+        if extractor is None
+        else HMCBatchCollator(extractor, config.data.hmc_point_source),
+        **_loader_worker_kwargs(config.data.num_workers),
     )
 
 
@@ -102,12 +138,15 @@ def build_eval_dataloader(
     config: ExperimentConfig,
     *,
     split: str,
+    extractor: HMCFeatureExtractor | None = None,
 ) -> DataLoader[dict[str, Any]]:
     """Create a deterministic dataloader for validation or test evaluation.
 
     Args:
         config: Full experiment configuration.
         split: Dataset split used for evaluation.
+        extractor: Optional HMC extractor; when given, HMC features are
+            computed in the dataloader workers.
 
     Returns:
         DataLoader[dict[str, Any]]: Deterministic evaluation dataloader.
@@ -131,6 +170,9 @@ def build_eval_dataloader(
         drop_last=False,
         generator=generator,
         worker_init_fn=_seed_worker,
+        collate_fn=None
+        if extractor is None
+        else HMCBatchCollator(extractor, config.data.hmc_point_source),
     )
 
 
@@ -218,6 +260,20 @@ def prepare_hmc_batch(
         LOGGER.error(message)
         raise SmokeTrainingError(message)
 
+    descriptor_tensor, sequence_tensors = extract_hmc_features_cpu(
+        points_bnc,
+        extractor,
+    )
+    return descriptor_tensor.to(device), [
+        sequence.to(device) for sequence in sequence_tensors
+    ]
+
+
+def extract_hmc_features_cpu(
+    points_bnc: Tensor,
+    extractor: HMCFeatureExtractor,
+) -> tuple[Tensor, list[Tensor]]:
+    """Extract batched HMC descriptors and sequences as CPU float32 tensors."""
     descriptors: list[Tensor] = []
     sequence_buckets: list[list[Tensor]] = [[] for _ in extractor.config.scales]
     for sample in points_bnc.detach().cpu().numpy():
@@ -227,13 +283,25 @@ def prepare_hmc_batch(
             sequence_buckets[sequence_index].append(
                 torch.from_numpy(sequence).to(torch.float32)
             )
-
-    descriptor_tensor = torch.stack(descriptors, dim=0).to(device)
-    sequence_tensors = [
-        torch.stack(sequence_bucket, dim=0).to(device)
-        for sequence_bucket in sequence_buckets
+    return torch.stack(descriptors, dim=0), [
+        torch.stack(sequence_bucket, dim=0) for sequence_bucket in sequence_buckets
     ]
-    return descriptor_tensor, sequence_tensors
+
+
+def resolve_hmc_batch(
+    batch: dict[str, Any],
+    extractor: HMCFeatureExtractor,
+    device: torch.device,
+    point_source: str,
+) -> tuple[Tensor, list[Tensor]]:
+    """Return HMC features, reusing ones precomputed by `HMCBatchCollator`."""
+    if "hmc_descriptors" in batch:
+        return batch["hmc_descriptors"].to(device, non_blocking=True), [
+            sequence.to(device, non_blocking=True)
+            for sequence in batch["hmc_sequences"]
+        ]
+    hmc_points = select_hmc_condition_points(batch, point_source)
+    return prepare_hmc_batch(hmc_points, extractor, device)
 
 
 def select_hmc_condition_points(
@@ -349,12 +417,16 @@ def apply_condition_vae_reconstruction(
 
 def _compute_grad_norm(parameters: list[Tensor]) -> float:
     """Compute the global L2 gradient norm of a parameter list."""
-    grad_norm_sq = 0.0
-    for parameter in parameters:
-        if parameter.grad is None:
-            continue
-        grad_norm_sq += float(parameter.grad.detach().pow(2).sum().item())
-    return grad_norm_sq**0.5
+    grads = [
+        parameter.grad.detach()
+        for parameter in parameters
+        if parameter.grad is not None
+    ]
+    if not grads:
+        return 0.0
+    # One host sync instead of one per parameter.
+    squared_norms = torch.stack([grad.double().pow(2).sum() for grad in grads])
+    return float(squared_norms.sum().item()) ** 0.5
 
 
 def _collect_trainable_parameters(
@@ -434,8 +506,12 @@ def train_one_step(
         LOGGER.error(message)
         raise SmokeTrainingError(message)
     labels = torch.as_tensor(batch["label"], device=device, dtype=torch.int64)
-    hmc_points = select_hmc_condition_points(batch, hmc_point_source)
-    descriptors, sequences = prepare_hmc_batch(hmc_points, extractor, device)
+    descriptors, sequences = resolve_hmc_batch(
+        batch,
+        extractor,
+        device,
+        hmc_point_source,
+    )
     target_descriptors = descriptors
     descriptors, sequences, vae_reconstruction_mask = (
         apply_condition_vae_reconstruction(
@@ -562,21 +638,49 @@ def save_checkpoint(
         auxiliary_state: Optional auxiliary module state payloads.
         ema_model_state: Optional averaged model state used for sampling.
     """
+    write_checkpoint_payload(
+        checkpoint_path,
+        build_checkpoint_payload(
+            model=model,
+            optimizer=optimizer,
+            scaler=scaler,
+            step=step,
+            epoch=epoch,
+            metrics=metrics,
+            auxiliary_state=auxiliary_state,
+            ema_model_state=ema_model_state,
+        ),
+    )
+
+
+def build_checkpoint_payload(
+    model: HMCConditionedDiTPointCloud,
+    optimizer: AdamW,
+    scaler: torch.amp.GradScaler | None,
+    step: int,
+    epoch: int,
+    metrics: dict[str, float],
+    auxiliary_state: dict[str, dict[str, Any]] | None = None,
+    ema_model_state: dict[str, Tensor] | None = None,
+) -> dict[str, Any]:
+    """Assemble the checkpoint dictionary written by `save_checkpoint`."""
+    return {
+        "epoch": epoch,
+        "step": step,
+        "model_state": model.state_dict(),
+        "optimizer_state": optimizer.state_dict(),
+        "scaler_state": None if scaler is None else scaler.state_dict(),
+        "metrics": metrics,
+        "auxiliary_state": {} if auxiliary_state is None else auxiliary_state,
+        "ema_model_state": ema_model_state,
+    }
+
+
+def write_checkpoint_payload(checkpoint_path: Path, payload: dict[str, Any]) -> None:
+    """Atomically write a checkpoint payload via a temporary file."""
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = checkpoint_path.with_suffix(f"{checkpoint_path.suffix}.tmp")
-    torch.save(
-        {
-            "epoch": epoch,
-            "step": step,
-            "model_state": model.state_dict(),
-            "optimizer_state": optimizer.state_dict(),
-            "scaler_state": None if scaler is None else scaler.state_dict(),
-            "metrics": metrics,
-            "auxiliary_state": {} if auxiliary_state is None else auxiliary_state,
-            "ema_model_state": ema_model_state,
-        },
-        temporary_path,
-    )
+    torch.save(payload, temporary_path)
     temporary_path.replace(checkpoint_path)
 
 
