@@ -2,13 +2,13 @@
 independent 8-vs-8 groups, metrics averaged over groups), adding MMD-CD / MMD-EMD.
 Reference/sample order is shuffled; results are averaged over --perms permutations.
 usage: val_eval_mmd.py --perms 3 --out out.json payload.pt [...]"""
-import argparse, glob, json, sys
+import argparse, glob, json, os, sys
 from pathlib import Path
 import numpy as np, torch
-sys.path.insert(0, '/fsx/weicyang/shix/emd_build'); sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src'))
+sys.path.insert(0, os.environ.get('EMD_BUILD', '/fsx/weicyang/shix/emd_build')); sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'src'))
 from hmc_dit3d.metrics.topodit_batch8 import pairwise_cd_emd, knn_accuracy, coverage
 
-ROOT = '/fsx/weicyang/shix/HMC-DiT3D/ShapeNetCore.v2.PC15k'
+ROOT = os.environ.get('SHAPENET_ROOT', '/fsx/weicyang/shix/HMC-DiT3D/ShapeNetCore.v2.PC15k')
 SYN = {'chair': '03001627', 'airplane': '02691156', 'car': '02958343'}
 
 def val_refs(cat):

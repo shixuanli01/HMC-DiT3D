@@ -94,13 +94,19 @@ python -m pip install -e hmc_dit3d
 
 ## 2. Download ShapeNetCore.v2.PC15k
 
-The prepared dataset is hosted on Google Drive. From the repository root:
+The dataset is the PointFlow release of ShapeNetCore.v2.PC15k, hosted in the
+official PointFlow
+[Google Drive folder](https://drive.google.com/drive/folders/1MMRp7mMvRj8-tORDaGTJvrAeCMYTWU2j?usp=sharing).
+The archive is about 7.7 GB. From the repository root:
 
 ```bash
 python -m pip install gdown
-gdown 1GgmM4dRbXUei4dKtgQKGLHLibuaghPep -O ShapeNetCore.v2.PC15k.zip
+gdown 1sw9gdk_igiyyt7MqALyxZhRrtPvAn0sX -O ShapeNetCore.v2.PC15k.zip
 unzip ShapeNetCore.v2.PC15k.zip
 ```
+
+The previous mirror (`1GgmM4dRbXUei4dKtgQKGLHLibuaghPep`) no longer resolves;
+use the PointFlow file ID above.
 
 The expected result is:
 
