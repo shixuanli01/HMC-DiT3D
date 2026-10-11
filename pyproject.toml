@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hmc-dit3d"
+version = "1.0.0"
+description = "HMC-DiT3D: Hilbert-multifractal conditioning for 3D point-cloud diffusion transformers."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+authors = [{ name = "Project Team" }]
+dependencies = [
+    "matplotlib>=3.8",
+    "numpy>=1.26,<3",
+    "torch>=2.4",
+    "hilbertcurve>=2.0.5",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "ruff>=0.11",
+]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "I",
+    "B",
+    "UP",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# the diagnostic scripts are deliberately compact one-file tools; style rules are relaxed there
+"scripts/**" = ["E501", "E701", "E702", "E401", "I001", "UP031", "E731", "B007"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
