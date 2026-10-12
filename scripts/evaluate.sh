@@ -3,6 +3,7 @@
 # under the validation protocol (val split reference, 8-vs-8 groups, 3 permutations, exact EMD).
 #
 # usage: scripts/evaluate.sh CATEGORY CONFIG CHECKPOINT [--mode trainbank|vae] [--vae VAE.pt] [--seeds "0 11 12 13"] [--tag NAME]
+#   --seeds    default = the main-table seed of CATEGORY/mode (chair: bank 95, vae 1; airplane: bank 0, vae 42; else 0)
 #                             [--category CLASS] [--bank BANK.pt]
 #   CATEGORY   chair | airplane | car | lamp | vessel
 #   CONFIG     the training YAML of the checkpoint
@@ -15,12 +16,17 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; cd "$HERE"
 CAT=$1; CFG=$2; CKPT=$3; shift 3
-MODE=trainbank; VAE=""; SEEDS="0"; TAG="main"; CATEGORY=""; BANK=""
+MODE=trainbank; VAE=""; SEEDS=""; TAG="main"; CATEGORY=""; BANK=""
 while [[ $# -gt 0 ]]; do case $1 in
   --mode) MODE=$2; shift 2;; --vae) VAE=$2; shift 2;; --seeds) SEEDS=$2; shift 2;; --tag) TAG=$2; shift 2;;
   --category) CATEGORY=$2; shift 2;; --bank) BANK=$2; shift 2;;
   *) echo "unknown option $1"; exit 1;; esac; done
 [[ "$MODE" == "vae" && -z "$VAE" ]] && { echo "--vae is required for --mode vae"; exit 1; }
+if [[ -z "$SEEDS" ]]; then  # main-table seeds (single seed per row); see DEFAULT_SEEDS in scripts/generate.py
+  case "${CATEGORY:-$CAT}/$MODE" in
+    chair/trainbank) SEEDS=95;; chair/vae) SEEDS=1;; airplane/trainbank) SEEDS=0;; airplane/vae) SEEDS=42;; *) SEEDS=0;;
+  esac
+fi
 export SHAPENET_ROOT="${SHAPENET_ROOT:-$HERE/ShapeNetCore.v2.PC15k}"
 export PYTHONPATH="${EMD_BUILD:?set EMD_BUILD to the emd_cuda build directory}:$HERE/src${PYTHONPATH:+:$PYTHONPATH}"
 BANK="${BANK:-results/banks/${CAT}_train.pt}"; mkdir -p results/banks "results/$CAT"

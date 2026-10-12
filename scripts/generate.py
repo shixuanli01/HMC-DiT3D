@@ -12,7 +12,10 @@ entries, the class label and the references to one category.
 Example:
   python scripts/generate.py --config configs/retrain_airplane_norm_bs512.yaml \
       --checkpoint ../checkpoints/dit/airplane_norm_epoch8000.pt --mode trainbank \
-      --bank results/banks/airplane_train.pt --seed 0 --fast --out results/airplane_bank_seed0.pt
+      --bank results/banks/airplane_train.pt --fast --out results/airplane_bank_seed0.pt
+
+Without --seed the main-table seed of the category/mode is used (chair: bank 95, VAE 1;
+airplane: bank 0, VAE 42; otherwise 0).
 """
 
 from __future__ import annotations
@@ -51,7 +54,11 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--out", required=True, help="output payload (.pt)")
     p.add_argument(
-        "--seed", type=int, default=0, help="overrides train.seed of the config"
+        "--seed",
+        type=int,
+        default=None,
+        help="sampling seed (overrides train.seed of the config); default = the main-table "
+        "seed of the category and mode (see DEFAULT_SEEDS), 0 otherwise",
     )
     p.add_argument("--gen-bs", type=int, default=166, help="generation batch size")
     p.add_argument(
@@ -82,11 +89,28 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+# Seeds of the main-table rows (validation protocol, single seed) per category and mode.
+DEFAULT_SEEDS = {
+    ("chair", "trainbank"): 95,
+    ("chair", "vae"): 1,
+    ("airplane", "trainbank"): 0,
+    ("airplane", "vae"): 42,
+}
+
+
+def default_seed(category: str | None, mode: str) -> int:
+    return DEFAULT_SEEDS.get((category or "", mode), 0)
+
+
 def main() -> None:
     a = parse_args()
     if a.mode == "vae" and not a.vae:
         raise SystemExit("--vae is required for --mode vae")
     cfg = load_experiment_config(Path(a.config))
+    if a.seed is None:
+        cats = list(cfg.data.categories)
+        a.seed = default_seed(a.category or (cats[0] if len(cats) == 1 else None), a.mode)
+        print(f"seed not given, using the main-table default {a.seed}")
     cfg = dataclasses.replace(cfg, train=dataclasses.replace(cfg.train, seed=a.seed))
 
     if a.fast:

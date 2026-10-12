@@ -13,7 +13,7 @@ conditions (**Ours-Bank**, a non-parametric condition library).
 ```text
 .
 ├── README.md
-├── CHECKPOINTS.md            released checkpoint, hash and download link
+├── CHECKPOINTS.md            released checkpoints, hashes and download link
 ├── src/hmc_dit3d/            the package
 │   ├── hmc/                  HMC extraction (extractor.py, config.py), condition encoder, condition VAE
 │   ├── models/hmc_dit.py     DiT-3D backbone with bottleneck-resampler fusion
@@ -71,9 +71,10 @@ The configs resolve the data root relative to `configs/`, so no path editing is 
 
 ## 3. Checkpoint
 
-See `CHECKPOINTS.md`. Put the airplane DiT at `checkpoints/dit/airplane_norm_epoch8000.pt`. Every checkpoint
-carries the global point normalisation it was trained with, so sampling returns raw ShapeNet coordinates
-without any post-processing.
+See `CHECKPOINTS.md`. Put the chair DiT at `checkpoints/dit/chair345_norm_epoch10000.pt`, the airplane DiT at
+`checkpoints/dit/airplane_norm_epoch8000.pt` and the chair condition VAE at `checkpoints/vae/chair345_b0.05_z64.pt`.
+Every checkpoint carries the global point normalisation it was trained with, so sampling returns raw ShapeNet
+coordinates without any post-processing.
 
 ## 4. Evaluate (validation protocol)
 
@@ -84,23 +85,32 @@ time in fp16; independent 8-vs-8 groups; three random permutations averaged; Cha
 ```bash
 export EMD_BUILD=/path/to/emd_build          # SHAPENET_ROOT defaults to ./ShapeNetCore.v2.PC15k
 
-# Ours-Bank: real train-split HMC conditions (seed 0)
-scripts/evaluate.sh airplane configs/retrain_airplane_norm_bs512.yaml checkpoints/dit/airplane_norm_epoch8000.pt
+# Chair, Ours-Bank: real train-split HMC conditions
+scripts/evaluate.sh chair configs/retrain_chair_norm_bs512.yaml checkpoints/dit/chair345_norm_epoch10000.pt
 
-# Ours-VAE: conditions sampled from the airplane condition VAE (seed 42)
+# Chair, Ours-VAE: conditions sampled from the released chair condition VAE
+scripts/evaluate.sh chair configs/retrain_chair_norm_bs512.yaml checkpoints/dit/chair345_norm_epoch10000.pt \
+  --mode vae --vae checkpoints/vae/chair345_b0.05_z64.pt
+
+# Airplane, Ours-Bank / Ours-VAE (the airplane VAE is trained as in "Condition VAE" below)
+scripts/evaluate.sh airplane configs/retrain_airplane_norm_bs512.yaml checkpoints/dit/airplane_norm_epoch8000.pt
 scripts/evaluate.sh airplane configs/retrain_airplane_norm_bs512.yaml checkpoints/dit/airplane_norm_epoch8000.pt \
-  --mode vae --vae checkpoints/vae/airplane.pt --seeds "42"
+  --mode vae --vae checkpoints/vae/airplane.pt
 ```
 
-The script builds the train-condition bank on first use (`results/banks/airplane_train.pt`, train split only),
-writes the payloads to `results/airplane/` and the scores to `results/airplane/val_main_<mode>.json`
+Without `--seeds` the script (and `scripts/generate.py` without `--seed`) uses the main-table seed of the
+category and mode: chair bank 95, chair VAE 1, airplane bank 0, airplane VAE 42, and 0 for everything else.
+The script builds the train-condition bank on first use (`results/banks/<category>_train.pt`, train split only),
+writes the payloads to `results/<category>/` and the scores to `results/<category>/val_main_<mode>.json`
 (mean and std over the three permutations). Generation takes about 10 minutes per seed on an H100 and
-scoring about 3 minutes. Expected numbers for this checkpoint (1-NNA-CD / 1-NNA-EMD / COV-CD / COV-EMD):
+scoring about 3 minutes. Expected numbers for the released checkpoints (1-NNA-CD / 1-NNA-EMD / COV-CD / COV-EMD):
 
-| Row | seed | expected |
-|---|---|---|
-| Ours-Bank | 0 | 54.79 / 52.83 / 57.92 / 58.58 |
-| Ours-VAE | 42 | 56.79 / 53.25 / 58.17 / 59.25 |
+| Category | Row | seed | expected |
+|---|---|---|---|
+| Chair | Ours-Bank | 95 | 49.01 / 47.36 / 57.62 / 57.98 |
+| Chair | Ours-VAE | 1 | 50.25 / 48.42 / 54.32 / 54.83 |
+| Airplane | Ours-Bank | 0 | 54.79 / 52.83 / 57.92 / 58.58 |
+| Airplane | Ours-VAE | 42 | 56.79 / 53.25 / 58.17 / 59.25 |
 
 Seed-to-seed standard deviations are about 1-1.5 points per metric; fp16 generation is non-deterministic, so
 expect differences of a few tenths. Two reporting rules: Ours-Bank uses real train conditions and is labelled as
@@ -154,10 +164,10 @@ python -m hmc_dit3d.train.build_bank --config configs/retrain_chair_norm_bs512.y
 scripts/evaluate.sh chair configs/retrain_chaircarairplane_norm_bs512.yaml results/retrain_chaircarairplane_norm_bs512/epoch_10000.pt \
   --category chair --bank results/banks/chair_train.pt --seeds "0 11 12 13" --tag mc3
 scripts/evaluate.sh chair configs/retrain_chaircarairplane_norm_bs512.yaml results/retrain_chaircarairplane_norm_bs512/epoch_10000.pt \
-  --category chair --bank results/banks/chair_train.pt --mode vae --vae checkpoints/vae/chair.pt --seeds "0 11 12 13" --tag mc3
+  --category chair --bank results/banks/chair_train.pt --mode vae --vae checkpoints/vae/chair345_b0.05_z64.pt --seeds "0 11 12 13" --tag mc3
 ```
 
-`checkpoints/vae/chair.pt` is the chair condition VAE trained on the chair bank (see "Condition VAE" above).
+`checkpoints/vae/chair345_b0.05_z64.pt` is the released chair condition VAE (trained on the chair bank of this config, see "Condition VAE" above).
 
 ## 6. Scripts
 
