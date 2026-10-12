@@ -20,7 +20,7 @@ conditions (**Ours-Bank**, a non-parametric condition library).
 │   ├── data/                 ShapeNet loader, train-condition bank, global point normalisation
 │   ├── train/                trainer (resume / EMA / AMP), diffusion schedule, samplers, VAE training
 │   └── metrics/              exact-EMD batch-8 metrics
-├── configs/                  one training config per category
+├── configs/                  one training config per category, plus the two multi-class configs
 ├── scripts/                  generate.py, evaluate_val_protocol.py, evaluate.sh
 └── tests/                    pytest suite
 ```
@@ -113,13 +113,12 @@ generator.
 python -m hmc_dit3d.train.train --config configs/retrain_airplane_norm_bs512.yaml
 ```
 
-The per-category configs (`configs/retrain_<category>_norm_bs512.yaml`) use batch size 512, 10,000 epochs and
-AMP; chair uses HMC scales {2,3,4} with q in {1,2}, the other categories {3,4,5} with q in {1,2,3}. The
+The per-category configs (`configs/retrain_<category>_norm_bs512.yaml`) share one recipe: HMC scales {3,4,5}
+with q in {1,2,3}, a resampler depth of 4, batch size 512, 10,000 epochs and AMP. The
 denoising target is whitened with the train-split global mean and scalar std (`data.normalize_points: true`);
 the statistics are computed at start-up and stored in every checkpoint. The trainer writes `latest.pt` every
 10 epochs (used by `auto_resume`), `epoch_N.pt` every 1,000 epochs, `best_train.pt`, `best_val.pt` and the
-final `train_checkpoint.pt`. One category takes 6-7 hours on a single H100 (36 GB for chair, 52 GB for the
-{3,4,5} categories). The per-epoch validation loss is a noisy single-timestep estimate that saturates long
+final `train_checkpoint.pt`. One category takes 6-11 hours on a single H100 (about 52 GB of GPU memory; chair has the most steps per epoch). The per-epoch validation loss is a noisy single-timestep estimate that saturates long
 before sample quality does, so select checkpoints by sampling rather than by `best_val`.
 
 ### Condition VAE (for Ours-VAE)
@@ -130,12 +129,40 @@ python -m hmc_dit3d.train.train_condition_vae --bank results/banks/airplane_trai
   --output checkpoints/vae/airplane.pt --latent-dim 64 --hidden-dims 2048,1024,512 --beta 0.05 --epochs 2000 --device cuda
 ```
 
+### Multi-class training
+
+One model can be trained on several categories at once; the class label is the index of the category in
+`data.categories` (chair 0, car 1, airplane 2) and enters the DiT through its class embedding, while the HMC
+condition is still extracted per shape. Two configs are provided, with the same recipe as the single-category ones:
+
+```bash
+python -m hmc_dit3d.train.train --config configs/retrain_chaircar_norm_bs512.yaml           # {chair, car},            7,070 shapes
+python -m hmc_dit3d.train.train --config configs/retrain_chaircarairplane_norm_bs512.yaml   # {chair, car, airplane},  9,902 shapes
+```
+
+Each run needs about 52 GB of GPU memory (two fit on an 80 GB card at `num_workers: 8` each) and takes roughly
+19 and 25 hours on one H100. The normalisation statistics are computed over the union of the training classes.
+
+To test a multi-class checkpoint on one class, draw that class's conditions from its **single-category** bank
+and pass `--category` so that the labels and reference shapes are restricted to it:
+
+```bash
+# chair bank from the chair config (same HMC settings), then evaluate the 3-class model on chair
+python -m hmc_dit3d.train.build_bank --config configs/retrain_chair_norm_bs512.yaml --split train --output results/banks/chair_train.pt
+scripts/evaluate.sh chair configs/retrain_chaircarairplane_norm_bs512.yaml results/retrain_chaircarairplane_norm_bs512/epoch_10000.pt \
+  --category chair --bank results/banks/chair_train.pt --seeds "0 11 12 13" --tag mc3
+scripts/evaluate.sh chair configs/retrain_chaircarairplane_norm_bs512.yaml results/retrain_chaircarairplane_norm_bs512/epoch_10000.pt \
+  --category chair --bank results/banks/chair_train.pt --mode vae --vae checkpoints/vae/chair.pt --seeds "0 11 12 13" --tag mc3
+```
+
+`checkpoints/vae/chair.pt` is the chair condition VAE trained on the chair bank (see "Condition VAE" above).
+
 ## 6. Scripts
 
 - `scripts/generate.py` - 664 samples from a checkpoint with `--mode vae | trainbank`; `--fast` for fp16,
   `--category` for multi-class checkpoints.
 - `scripts/evaluate_val_protocol.py` - the validation-protocol scorer (batched exact EMD, cached reference matrices).
-- `scripts/evaluate.sh` - bank build + generation + scoring for one checkpoint.
+- `scripts/evaluate.sh` - bank build + generation + scoring for one checkpoint; `--category` and `--bank` for multi-class checkpoints.
 
 ## Citation
 

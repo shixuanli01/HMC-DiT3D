@@ -1,16 +1,15 @@
-# Scheme 3 (PROGRESS_2026-10-06.md s5): formal chair bottleneck config with the
-# denoising target whitened by the train-split global mean / scalar std.
-# No HMC dropout: isolates the effect of normalization alone.
-# num_workers 8 so two runs can share one 20-core node.
+# Chair: HMC scales [3,4,5], q [1,2,3], resampler depth 4 (same recipe as the other categories),
+# normalized targets, bs512 x 10000 epochs.
 experiment_name: retrain_chair_norm_bs512
 hmc:
   scales:
-  - 2
   - 3
   - 4
+  - 5
   q_orders:
   - 1.0
   - 2.0
+  - 3.0
   normalization_mode: bbox
   delta: 1.0e-08
   empty_box_epsilon: 1.0e-12
@@ -34,7 +33,7 @@ data:
   split: train
   sample_size: 2048
   batch_size: 512
-  num_workers: 8
+  num_workers: 16
   pin_memory: true
   random_subsample: true
   drop_last: true
@@ -52,7 +51,7 @@ model:
   mlp_ratio: 4.0
   class_dropout_prob: 0.1
   num_bottleneck_latents: 128
-  resampler_depth: 3
+  resampler_depth: 4
   resampler_mlp_ratio: 4.0
 train:
   seed: 42
