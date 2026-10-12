@@ -48,7 +48,7 @@ cd /tmp/TopoDiT-3D/metrics/PyTorchEMD
 # three source fixes for current PyTorch (the math is unchanged)
 sed -i 's|#include <THC/THC.h>|#include <c10/cuda/CUDAException.h>|; s|THCudaCheck(cudaGetLastError());|C10_CUDA_CHECK(cudaGetLastError());|; s|x.type().is_cuda()|x.is_cuda()|' cuda/emd_kernel.cu
 sed -i 's|CHECK_EQ(\(.*\), \(.*\));|TORCH_CHECK((\1) == (\2));|' cuda/emd_kernel.cu
-TORCH_CUDA_ARCH_LIST="9.0" python setup.py build_ext --build-lib /path/to/emd_build   # set your GPU architecture
+TORCH_CUDA_ARCH_LIST="9.0" python setup.py build_ext --build-lib /path/to/emd_build   # H100: 9.0, B200: 10.0, RTX 5090: 12.0, A100: 8.0
 export EMD_BUILD=/path/to/emd_build
 ```
 
@@ -140,8 +140,10 @@ python -m hmc_dit3d.train.train --config configs/retrain_chaircar_norm_bs512.yam
 python -m hmc_dit3d.train.train --config configs/retrain_chaircarairplane_norm_bs512.yaml   # {chair, car, airplane},  9,902 shapes
 ```
 
-Each run needs about 52 GB of GPU memory (two fit on an 80 GB card at `num_workers: 8` each) and takes roughly
-19 and 25 hours on one H100. The normalisation statistics are computed over the union of the training classes.
+Each run needs about 52 GB of GPU memory, so the two runs fit together on one B200 (or one each on two H100s) but
+not on a single 80 GB card. Alone on an H100 they take roughly 16 and 24 hours; running both at once on one B200
+takes about 18-22 hours in total. HMC features are extracted on the CPU by the dataloader workers, so give each run
+`num_workers: 16` when the machine has 32 or more cores (the configs default to 8). The normalisation statistics are computed over the union of the training classes.
 
 To test a multi-class checkpoint on one class, draw that class's conditions from its **single-category** bank
 and pass `--category` so that the labels and reference shapes are restricted to it:
