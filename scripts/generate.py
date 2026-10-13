@@ -15,7 +15,8 @@ Example:
       --bank results/banks/airplane_train.pt --fast --out results/airplane_bank_seed0.pt
 
 Without --seed the main-table seed of the category/mode is used (chair: bank 95, VAE 1;
-airplane: bank 0, VAE 42; otherwise 0).
+airplane: bank 0, VAE 42; car: bank 20, VAE 11; lamp: bank 0, VAE 11; vessel: bank 42, VAE 0;
+multi-class checkpoints follow --category; otherwise 0).
 """
 
 from __future__ import annotations
@@ -95,6 +96,12 @@ DEFAULT_SEEDS = {
     ("chair", "vae"): 1,
     ("airplane", "trainbank"): 0,
     ("airplane", "vae"): 42,
+    ("car", "trainbank"): 20,
+    ("car", "vae"): 11,
+    ("lamp", "trainbank"): 0,
+    ("lamp", "vae"): 11,
+    ("vessel", "trainbank"): 42,
+    ("vessel", "vae"): 0,
 }
 
 

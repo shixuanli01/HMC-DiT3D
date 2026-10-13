@@ -3,7 +3,7 @@
 # under the validation protocol (val split reference, 8-vs-8 groups, 3 permutations, exact EMD).
 #
 # usage: scripts/evaluate.sh CATEGORY CONFIG CHECKPOINT [--mode trainbank|vae] [--vae VAE.pt] [--seeds "0 11 12 13"] [--tag NAME]
-#   --seeds    default = the main-table seed of CATEGORY/mode (chair: bank 95, vae 1; airplane: bank 0, vae 42; else 0)
+#   --seeds    default = the main-table seed of CATEGORY/mode (chair 95/1, airplane 0/42, car 20/11, lamp 0/11, vessel 42/0 for bank/vae; else 0)
 #                             [--category CLASS] [--bank BANK.pt]
 #   CATEGORY   chair | airplane | car | lamp | vessel
 #   CONFIG     the training YAML of the checkpoint
@@ -24,7 +24,9 @@ while [[ $# -gt 0 ]]; do case $1 in
 [[ "$MODE" == "vae" && -z "$VAE" ]] && { echo "--vae is required for --mode vae"; exit 1; }
 if [[ -z "$SEEDS" ]]; then  # main-table seeds (single seed per row); see DEFAULT_SEEDS in scripts/generate.py
   case "${CATEGORY:-$CAT}/$MODE" in
-    chair/trainbank) SEEDS=95;; chair/vae) SEEDS=1;; airplane/trainbank) SEEDS=0;; airplane/vae) SEEDS=42;; *) SEEDS=0;;
+    chair/trainbank) SEEDS=95;; chair/vae) SEEDS=1;; airplane/trainbank) SEEDS=0;; airplane/vae) SEEDS=42;;
+    car/trainbank) SEEDS=20;; car/vae) SEEDS=11;; lamp/trainbank) SEEDS=0;; lamp/vae) SEEDS=11;;
+    vessel/trainbank) SEEDS=42;; vessel/vae) SEEDS=0;; *) SEEDS=0;;
   esac
 fi
 export SHAPENET_ROOT="${SHAPENET_ROOT:-$HERE/ShapeNetCore.v2.PC15k}"

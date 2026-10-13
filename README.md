@@ -99,7 +99,10 @@ scripts/evaluate.sh airplane configs/retrain_airplane_norm_bs512.yaml checkpoint
 ```
 
 Without `--seeds` the script (and `scripts/generate.py` without `--seed`) uses the main-table seed of the
-category and mode: chair bank 95, chair VAE 1, airplane bank 0, airplane VAE 42, and 0 for everything else.
+category and mode (bank / VAE): chair 95 / 1, airplane 0 / 42, car 20 / 11, lamp 0 / 11, vessel 42 / 0, and 0
+otherwise (multi-class checkpoints follow `--category`). All seven configs share one recipe (HMC scales {3,4,5},
+q {1,2,3}, resampler depth 4, normalized targets, batch size 512, 10,000 epochs, training seed 42) and differ
+only in `data.categories`.
 The script builds the train-condition bank on first use (`results/banks/<category>_train.pt`, train split only),
 writes the payloads to `results/<category>/` and the scores to `results/<category>/val_main_<mode>.json`
 (mean and std over the three permutations). Generation takes about 10 minutes per seed on an H100 and
