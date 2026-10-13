@@ -71,10 +71,10 @@ The configs resolve the data root relative to `configs/`, so no path editing is 
 
 ## 3. Checkpoint
 
-See `CHECKPOINTS.md`. Put the chair DiT at `checkpoints/dit/chair345_norm_epoch10000.pt`, the airplane DiT at
-`checkpoints/dit/airplane_norm_epoch8000.pt` and the chair condition VAE at `checkpoints/vae/chair345_b0.05_z64.pt`.
-Every checkpoint carries the global point normalisation it was trained with, so sampling returns raw ShapeNet
-coordinates without any post-processing.
+See `CHECKPOINTS.md`. Put the chair DiT at `checkpoints/dit/chair345_norm_epoch10000.pt` and the airplane DiT at
+`checkpoints/dit/airplane_norm_epoch8000.pt`. Every checkpoint carries the global point normalisation it was
+trained with, so sampling returns raw ShapeNet coordinates without any post-processing. The condition VAEs used
+for Ours-VAE are not released; they are trained from the bank in a few minutes (section 5, "Condition VAE").
 
 ## 4. Evaluate (validation protocol)
 
@@ -88,11 +88,11 @@ export EMD_BUILD=/path/to/emd_build          # SHAPENET_ROOT defaults to ./Shape
 # Chair, Ours-Bank: real train-split HMC conditions
 scripts/evaluate.sh chair configs/retrain_chair_norm_bs512.yaml checkpoints/dit/chair345_norm_epoch10000.pt
 
-# Chair, Ours-VAE: conditions sampled from the released chair condition VAE
+# Chair, Ours-VAE: conditions sampled from the chair condition VAE (trained as in "Condition VAE" below)
 scripts/evaluate.sh chair configs/retrain_chair_norm_bs512.yaml checkpoints/dit/chair345_norm_epoch10000.pt \
-  --mode vae --vae checkpoints/vae/chair345_b0.05_z64.pt
+  --mode vae --vae checkpoints/vae/chair.pt
 
-# Airplane, Ours-Bank / Ours-VAE (the airplane VAE is trained as in "Condition VAE" below)
+# Airplane, Ours-Bank / Ours-VAE
 scripts/evaluate.sh airplane configs/retrain_airplane_norm_bs512.yaml checkpoints/dit/airplane_norm_epoch8000.pt
 scripts/evaluate.sh airplane configs/retrain_airplane_norm_bs512.yaml checkpoints/dit/airplane_norm_epoch8000.pt \
   --mode vae --vae checkpoints/vae/airplane.pt
@@ -134,10 +134,14 @@ before sample quality does, so select checkpoints by sampling rather than by `be
 ### Condition VAE (for Ours-VAE)
 
 ```bash
+# airplane (chair: the same two commands with configs/retrain_chair_norm_bs512.yaml, chair_train.pt, checkpoints/vae/chair.pt)
 python -m hmc_dit3d.train.build_bank --config configs/retrain_airplane_norm_bs512.yaml --split train --output results/banks/airplane_train.pt
 python -m hmc_dit3d.train.train_condition_vae --bank results/banks/airplane_train.pt \
-  --output checkpoints/vae/airplane.pt --latent-dim 64 --hidden-dims 2048,1024,512 --beta 0.05 --epochs 2000 --device cuda
+  --output checkpoints/vae/airplane.pt --latent-dim 64 --hidden-dims 2048,1024,512 --beta 0.05 --epochs 2000 --seed 42 --device cuda
 ```
+
+The VAEs behind the expected Ours-VAE numbers in section 4 were trained with exactly these settings (seed 42);
+a retrained VAE reproduces them up to the usual seed noise.
 
 ### Multi-class training
 
@@ -164,10 +168,10 @@ python -m hmc_dit3d.train.build_bank --config configs/retrain_chair_norm_bs512.y
 scripts/evaluate.sh chair configs/retrain_chaircarairplane_norm_bs512.yaml results/retrain_chaircarairplane_norm_bs512/epoch_10000.pt \
   --category chair --bank results/banks/chair_train.pt --seeds "0 11 12 13" --tag mc3
 scripts/evaluate.sh chair configs/retrain_chaircarairplane_norm_bs512.yaml results/retrain_chaircarairplane_norm_bs512/epoch_10000.pt \
-  --category chair --bank results/banks/chair_train.pt --mode vae --vae checkpoints/vae/chair345_b0.05_z64.pt --seeds "0 11 12 13" --tag mc3
+  --category chair --bank results/banks/chair_train.pt --mode vae --vae checkpoints/vae/chair.pt --seeds "0 11 12 13" --tag mc3
 ```
 
-`checkpoints/vae/chair345_b0.05_z64.pt` is the released chair condition VAE (trained on the chair bank of this config, see "Condition VAE" above).
+`checkpoints/vae/chair.pt` is the chair condition VAE trained on the chair bank (see "Condition VAE" above).
 
 ## 6. Scripts
 
